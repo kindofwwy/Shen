@@ -264,7 +264,7 @@ class Operator():
             o.diriv()
             o.inp=None
             o.out=None
-        Operator.computelist=[]
+        Operator.clean()
 
     @classmethod
     def clean(cls):
@@ -898,6 +898,33 @@ class MiniTransformer:
         x=self.n2(x)
         x+=x2
         x=resize2d(x,self.embsize,self.windowsize)
+        return x
+
+    def grad_descent_zero(self,k):
+        self.a.grad_descent_zero(k)
+        self.f1.grad_descent_zero(k)
+        self.f2.grad_descent_zero(k)
+        self.n1.grad_descent_zero(k)
+        self.n2.grad_descent_zero(k)
+
+class Transformer:
+    def __init__(self,headnum,embsize):
+        self.a=MultiAtt(headnum,embsize)
+        self.f1=Linear(embsize,embsize*4)
+        self.f2=Linear(embsize*4,embsize)
+        self.n1=Norm()
+        self.n2=Norm()
+    
+    def __call__(self,x,masklist=None,trimask=False):
+        x2=x
+        x=self.a(x,masklist,trimask)
+        x=[self.n1(i) for i in x]
+        x=[x[i]+x2[i] for i in range(len(x))]
+        
+        x2=x
+        x=[self.f2(self.f1(i).relu()) for i in x]
+        x=[self.n2(i) for i in x]
+        x=[x[i]+x2[i] for i in range(len(x))]
         return x
 
     def grad_descent_zero(self,k):
