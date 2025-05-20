@@ -187,7 +187,7 @@ class model:
             i.grad_descent_zero(k)
         self.last.grad_descent_zero(k)
 
-def train(m:model,texts,biao,batchsize=64,k=0.0001,shuffle=True):
+def train(m:model,texts,biao,batchsize=64,k=0.0001,shuffle=True,opt=None):
     back_count=0
     aloss=0
     t0=time.perf_counter()
@@ -211,7 +211,10 @@ def train(m:model,texts,biao,batchsize=64,k=0.0001,shuffle=True):
             back_count+=1
             
             if back_count%batchsize==0:
-                m.optimize(k/batchsize)
+                if opt is None:
+                    m.optimize(k/batchsize)
+                else:
+                    opt.step()
                 t1=time.perf_counter()
                 t=t1-t0
                 t0=t1
@@ -267,8 +270,17 @@ if save_name in os.listdir():
 
 m=model(embed_dim=10,layer_n=2,head_n=2,biao_size=len(biao),window_size=30)#test
 # m=model(embed_dim=30,layer_n=6,head_n=8,biao_size=len(biao),window_size=30)
-texts=gushi_split(text_file)
-while True:
-    train(m,texts,biao,batchsize=15,k=0.003)
-    Layer.saveall(save_name)
-# run(m,"",biao,t=0.9)
+
+# opt=Adam(k=0.008/30)
+# texts=gushi_split(text_file)
+# while True:
+#     train(m,texts,biao,batchsize=30,opt=opt)
+#     Layer.saveall(save_name)
+
+t0=time.perf_counter()
+run(m,"",biao,t=0.9)
+t1=time.perf_counter()
+print(t1-t0)
+
+# print(text2token("先帝不老",biao))
+
