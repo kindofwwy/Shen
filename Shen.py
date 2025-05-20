@@ -478,6 +478,32 @@ class Tanh(Operator):
     def diriv(self):
         self.inp.grad+=self.out.grad*Vec([1-i**2 for i in self.out.data])
 
+class Linear_op(Operator):
+    def __init__(self):
+        super().__init__()
+    
+    def compute(self,matrix,a):
+        self.inp=[matrix,a]
+        if matrix.bias:
+            
+            o=[sum(matrix.w[i].data*a.data)+matrix.b[i].data[0] for i in range(len((matrix.w)))]
+        else:
+            o=[sum(matrix.w[i].data*a.data) for i in range(len((matrix.w)))]
+        o=Ten(o)
+        self.out=o
+        return o
+    
+    def diriv(self):
+        if self.inp[0].bias:
+            for i in range(len(self.inp[0].w)):
+                self.inp[0].w[i].grad+=Vec([self.out.grad[i]*d for d in self.inp[1].data])
+                self.inp[0].b[i].grad+=Vec([self.out.grad[i] for t in range(len(self.inp[0].b[i].grad))])
+                self.inp[1].grad+=Vec([self.out.grad[i]*d for d in self.inp[0].w[i].data])
+        else:
+            for i in range(len(self.inp[0].w)):
+                self.inp[0].w[i].grad+=Vec([self.out.grad[i]*d for d in self.inp[1].data])
+                self.inp[1].grad+=Vec([self.out.grad[i]*d for d in self.inp[0].w[i].data])
+    
 class Layer:
     '''
     数据层。所有要保存数据的类都需要继承此类
@@ -490,9 +516,10 @@ class Layer:
 
     def __init__(self,*args):
         '''
-        当处于读取状态(isload==True)时，继承了Layer的实例会按顺序读取layerlist中的内容
-        当处于存储状态(issave==True)时，继承了Layer的实例会在创建时被加入layerlist，它在saveall调用时会被保存为文件
-        一般情况下，继承它的类的init中需最后调用super().init()，防止读取的数据被覆盖
+        当处于读取状态(isload==True)时，继承了Layer的实例会按顺序读取layerlist中的内容。
+        当处于存储状态(issave==True)时，继承了Layer的实例会在创建时被加入layerlist，它在saveall调用时会被保存为文件。
+        一般情况下，继承它的类的init中需最后调用super().init()，防止读取的数据被覆盖。
+        或在if not Layer.isload:中进行初始化。
         '''
         if not Layer.issave:
             return
@@ -508,7 +535,7 @@ class Layer:
     def save(self):
         '''
         将自身转为str的形式。所有继承了Layer的类需重写此方法
-        :return: str
+        :return: str 内容中不能包含转行
         '''
         pass
 
@@ -519,6 +546,13 @@ class Layer:
         :return: None
         '''
         pass
+    
+    def param(self):
+        '''
+        返回自身需要优化的参数
+        :return: list[Ten,Ten...]
+        '''
+        return []
 
     @classmethod
     def saveall(cls, name):
@@ -529,7 +563,10 @@ class Layer:
         '''
         with open(name,"w") as f:
             for i in Layer.layerlist:
-                f.write(i.save()+"\n")
+                content=i.save()
+                if content is None:
+                    continue
+                f.write(content+"\n")
 
     @classmethod
     def loadall(cls, name):
@@ -542,6 +579,13 @@ class Layer:
         with open(name,"r") as f:
             Layer.layerlist=f.readlines()
             Layer.filelen=len(Layer.layerlist)
+    
+    @classmethod
+    def getall_param(cls):
+        l=[]
+        for i in Layer.layerlist:
+            l+=i.param()
+        return l
 
 class Linear(Layer):
     def __init__(self,inpsize,outsize,bias=True):
@@ -558,18 +602,24 @@ class Linear(Layer):
                 self.b=[randinit(1) for i in range(outsize)]
         super().__init__()
 
-    def __call__(self,a):
+    def __call__(self,a,with_op=True):
         '''
         进行运算
         :param a: Ten
+        :param with_op: bool 使用单独的linear运算符
         :return: Ten
         '''
-        if self.bias:
-            o=[(self.w[i]*a).sum()+self.b[i] for i in range(len((self.w)))]
+        if with_op:
+            o=Linear_op()
+            c=o.compute(self,a)
+            return c
         else:
-            o=[(self.w[i]*a).sum() for i in range(len((self.w)))]
-        o=Ten.connect(o)
-        return o
+            if self.bias:
+                o=[(self.w[i]*a).sum()+self.b[i] for i in range(len((self.w)))]
+            else:
+                o=[(self.w[i]*a).sum() for i in range(len((self.w)))]
+            o=Ten.connect(o)
+            return o
 
     def grad_descent_zero(self,k):
         '''
@@ -582,6 +632,8 @@ class Linear(Layer):
             self.b[i].graddescent(k)
             self.w[i].zerograd()
             self.b[i].zerograd()
+        if self.is_cache:
+            self.cache=dict()
 
     def dcopy(self):
         '''
@@ -611,6 +663,9 @@ class Linear(Layer):
             self.b=[Ten(i) for i in b]
         else:
             self.bias=False
+    
+    def param(self):
+        return self.w+self.b
 
 class Ten2(Ten,Layer):
     '''
@@ -626,6 +681,9 @@ class Ten2(Ten,Layer):
 
     def load(self,t):
         self.data=Vec(eval(t))
+    
+    def param(self):
+        return [self]
 
 class Conv(Layer):
     def __init__(self,width,height,stride_w=1,stride_h=1,pad=True,bias=True):
@@ -710,6 +768,9 @@ class Conv(Layer):
     def grad_descent_zero(self,k):
         self.kernel.graddescent(k)
         self.kernel.zerograd()
+    
+    def param(self):
+        return [self.kernel,self.b]
 
 class MultiConv:
     def __init__(self,inchannel,outchannel,width,height,stride_w=1,stride_h=1,pad=True,bias=True):
@@ -950,6 +1011,124 @@ class MiniLinear:
         self.f1.grad_descent_zero(k)
         self.f2.grad_descent_zero(k)
 
+class Optimizer(Layer):
+    '''
+    优化器类。需要储存参数需要重写save()和load()函数，详见Layer
+    当参数未指定时，需要在所有参数创建后再实例化此类！
+    '''
+    def __init__(self,params=None):
+        '''
+        :param params:list[Ten,Ten...] 需要优化的参数的列表，为None时优化所有Layer中的参数
+        '''
+        super().__init__()
+        if params is None:
+            self.params=Layer.getall_param()
+        else:
+            self.params=params
+    
+    def step(self):
+        '''
+        进行一次优化。继承了Optimizer的类需重写此方法
+        '''
+        pass
+    
+    def zerograd(self):
+        '''
+        使参数的梯度归零
+        '''
+        for i in self.params:
+            i.zerograd()
+
+class SGD(Optimizer):
+    def __init__(self,params=None,k=0.001):
+        '''
+        梯度下降
+        :param k: float 步长
+        '''
+        super().__init__(params)
+        self.k=k
+    
+    def step(self):
+        for i in self.params:
+            i.graddescent(self.k)
+            i.zerograd()
+
+class Momentum(Optimizer):
+    def __init__(self,params=None,k=0.001,gamma=0.8):
+        '''
+        带动量的梯度下降
+        :param k: float 步长
+        :param gamma: float 惯性参数
+        '''
+        if not Layer.isload:
+            if params is None:
+                self.m=[0 for i in range(sum([len(p) for p in Layer.getall_param()]))]
+            else:
+                self.m=[0 for i in range(sum([len(p) for p in params]))]
+        super().__init__(params)
+        self.k=k
+        self.gamma=gamma
+        
+    def step(self):
+        m_index=0
+        for t in self.params:
+            for ten_index in range(len(t)):
+                t.data[ten_index]-=self.k*self.m[m_index]
+                self.m[m_index]=self.gamma*self.m[m_index]+(1-self.gamma)*t.grad[ten_index]
+                t.grad[ten_index]=0
+                m_index+=1
+    
+    def save(self):
+        return str(self.m)
+    
+    def load(self,t):
+        self.m=eval(t)
+
+class Adam(Optimizer):
+    def __init__(self,params=None,k=0.001,b1=0.9,b2=0.999,eps=1e-8):
+        '''
+        Adaptive Moment Estimation，自适应矩估计
+        :param k: float 步长
+        :param b1: float 一阶矩估计参数（惯性参数）
+        :param b2: float 二阶矩估计参数
+        :param eps: float 防止除以0
+        '''
+        if not Layer.isload:
+            if params is None:
+                self.m=[0 for i in range(sum([len(p) for p in Layer.getall_param()]))]
+                self.s=[0 for i in range(sum([len(p) for p in Layer.getall_param()]))]
+            else:
+                self.m=[0 for i in range(sum([len(p) for p in params]))]
+                self.s=[0 for i in range(sum([len(p) for p in params]))]
+            self.times=1
+        super().__init__(params)
+        self.k=k
+        self.b1=b1
+        self.b2=b2
+        self.eps=eps
+
+    def step(self):
+        index=0
+        for t in self.params:
+            for ten_index in range(len(t)):
+                self.m[index]=self.b1*self.m[index]+(1-self.b1)*t.grad[ten_index]
+                self.s[index]=self.b2*self.s[index]+(1-self.b2)*t.grad[ten_index]**2
+                cm=self.m[index]/(1-self.b1**self.times)
+                cs=self.s[index]/(1-self.b2**self.times)
+                t.data[ten_index]-=self.k*cm/(cs**0.5+self.eps)
+                t.grad[ten_index]=0
+                index+=1
+        self.times+=1
+    
+    def save(self):
+        return str(self.m)+"/"+str(self.s)+"/"+str(self.times)
+    
+    def load(self,t):
+        t=t.split("/")
+        self.m=eval(t[0])
+        self.s=eval(t[1])
+        self.times=float(t[2])
+    
 def randinit(size):
     '''
     初始化权重
