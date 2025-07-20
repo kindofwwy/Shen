@@ -915,6 +915,31 @@ class LSTM:
         self.inputgate2.grad_descent_zero(k)
         self.outputgate.grad_descent_zero(k)
 
+class RNN:
+    def __init__(self,embedsize,outputsize):
+        '''
+        线性循环神经网络
+        :param embedsize: int 输入的向量大小
+        :param outputsize: int 输出的向量大小
+        '''
+        self.outputsize=outputsize
+        self.f1=Linear(embedsize+outputsize,outputsize)
+    
+    def __call__(self,x):
+        '''
+        进行运算
+        :param x: list[Ten,Ten...]
+        '''
+        hidden=Ten.zero(self.outputsize)
+        out=[]
+        for i in x:
+            hidden=self.f1(Ten.connect([hidden,i]))
+            out.append(hidden)
+        return out
+
+    def grad_descent_zero(self,k):
+        self.f1.grad_descent_zero(k)
+        
 class Norm:
     def __init__(self):
         '''
